@@ -1,0 +1,169 @@
+---
+title: "Wikipedia C-19 Comms Stats"
+output: 
+  flexdashboard::flex_dashboard
+   
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(DT)
+library(tidyverse)
+library(lubridate)
+library(waxer)
+library(data.table)
+library(dplyr)
+library(scales)
+library(plotly)
+library(polloi)
+
+```
+
+Pageviews 
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Wikipedia Pageviews - Covid-19 related pages
+
+```{r echo = FALSE, message= FALSE}
+#Read in Comms related pages list
+related_pages <- read_csv("/srv/published/dashboards/Wikipedia_C-19_Comms_Stats/docs/related_pages.csv")
+#related_pages <- read_csv("related_pages.csv")
+related_pages = data.table(related_pages)
+
+#test <- related_pages[0:5, ]
+#test = data.table(test)
+
+#Query for latest data
+pv_start = "20200404"
+pv_end <- format(Sys.Date(), "%Y%m%d")
+
+
+#make table for data
+pageviews = tibble(page_name = 'na', date = as.Date('2019-12-01'), views = 0)
+
+for (row in 1:nrow(related_pages))
+#for (row in 1:nrow(test))
+{
+   project_name =  related_pages[row,"project"]
+   page = related_pages[row,"page"]
+  
+  
+  try({  result = wx_page_views(
+    project = toString(project_name[[1]]),
+    page_name = toString(page[[1]]),
+    start_date = pv_start,
+    end_date = pv_end )
+  
+  pageviews = bind_rows(pageviews,result)}, silent = TRUE)
+  
+} 
+
+
+#Group by date, sum views of all pages
+pageviews[-1, ] %>% 
+  group_by(date) %>%
+  summarize(total_views = sum(views)) %>%
+  ungroup() %>%
+  arrange(desc(date)) -> pageview_new
+
+
+#merge new data with archive data (pre-grouped by date, total_views)
+archive <- read_csv("/srv/published/dashboards/Wikipedia_C-19_Comms_Stats/docs/pageview_archive.csv")
+
+pageview_totals <- rbind(pageview_new, archive)
+
+datatable(pageview_totals, rownames = FALSE, colnames = c('Date', 'Daily Total Views'), extensions = 'Buttons', options = list(
+                dom = 'Bfrtip',
+                buttons = c('copy', 'csv'),
+                  initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}"),
+                lengthMenu = list(c(10,25,50,-1),
+                                             c(10,25,50,"All"))
+                
+)
+)
+
+```
+
+>Additional data is refreshed daily at https://covid-data.wmflabs.org/  
+This dashboard is maintained by <a href="https://meta.wikimedia.org/wiki/User:SNowick_(WMF)">Shay Nowick</a> for Wikimedia Product Analytics.  
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Stats
+
+```{r}
+#Add total pageviews
+
+
+totals <- pageview_totals %>% 
+  summarise(views = sum(total_views),n_distinct(date)) 
+
+view_t <- toString(totals$views)
+view_t <- prettyNum(view_t, big.mark=",",scientific=FALSE)
+dates <- totals$`n_distinct(date)`
+
+#Comms list stats
+related_pages %>% 
+  summarise(n_distinct(page), n_distinct(project), n_distinct(language_name)) -> related
+pages <- related$`n_distinct(page)`
+project <- related$`n_distinct(project)`
+language <- related$`n_distinct(language_name)`
+
+
+
+```
+
+Total pageviews to date:  
+`r view_t`  
+over `r dates` days.
+
+Strongly-related pages:  
+`r pages` articles  
+`r project` wikis and  
+`r language` languages.
+
+The strongly-related pages list is compiled by <a href=https://meta.wikipedia.org/wiki/User:Diego_(WMF)">Diego (WMF)</a> using all Wikidata Articles that link to a main COVID-19 pages <a href="https://www.wikidata.org/wiki/Q84263196">COVID-19 (Q84263196)</a> and the <a href="https://www.wikidata.org/wiki/Q81068910">2019–20 COVID-19 pandemic (Q81068910)</a>, then collecting relationships between the seeds and all the resulting items. The set we are using excludes pages specifically about people and other less relevant pages.
+
+Methodology:
+https://paws-public.wmflabs.org/paws-public/User:Diego_(WMF)/CoronaAllRelatedPagesMarch30.ipynb
+
+
+
+Pageview Line Graph 
+=======================================================================
+
+### Wikipedia Pageviews - Covid-19 related pages  
+
+```{r echo = FALSE, message= FALSE}
+options(scipen = 999)
+
+pageview_totals %>% 
+  arrange(date) -> pageview_gg
+
+
+g <- ggplot(data=pageview_gg[which(pageview_gg$total_views>3000),], aes(x=date, y=total_views)) +
+   geom_line(size = .6, color = "dodgerblue3") +
+   theme_light() +
+   scale_x_date(labels = date_format("%B %Y"), breaks = "1 month") +
+  scale_y_continuous(labels = polloi::compress)  +
+   theme(axis.text.x = element_text(hjust = 1)) +
+   labs(x = 'Date', y = 'Daily Total Views', title = NULL)
+ggplotly(g, tooltip = c("total_views", "date")) %>%
+   config(displayModeBar = FALSE) %>%
+  layout(legend = list(orientation = "h", x = 0.0, y = -0.4)) 
+
+```
+
+
+>Additional data is refreshed daily at https://covid-data.wmflabs.org/  
+This dashboard is maintained by <a href="https://meta.wikimedia.org/wiki/User:SNowick_(WMF)">Shay Nowick</a> for Wikimedia Product Analytics.  
+
+
